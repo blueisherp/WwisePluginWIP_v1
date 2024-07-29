@@ -28,6 +28,7 @@ the specific language governing permissions and limitations under the License.
 #define MyPluginFX_H
 
 #include "MyPluginFXParams.h"
+#include <cmath>
 
 /// See https://www.audiokinetic.com/library/edge/?source=SDK&id=soundengine__plugins__effects.html
 /// for the documentation about effect plug-ins
@@ -65,6 +66,8 @@ private:
     MyPluginFXParams* m_pParams;
     AK::IAkPluginMemAlloc* m_pAllocator;
     AK::IAkEffectPluginContext* m_pContext;
+    AkUInt32 SampleRate;
+    AkReal32 rmsMoving = 0.f;       // in linear
 };
 
 #endif // MyPluginFX_H

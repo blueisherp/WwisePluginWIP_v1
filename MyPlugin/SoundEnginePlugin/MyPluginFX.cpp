@@ -57,6 +57,7 @@ AKRESULT MyPluginFX::Init(AK::IAkPluginMemAlloc* in_pAllocator, AK::IAkEffectPlu
     m_pParams = (MyPluginFXParams*)in_pParams;
     m_pAllocator = in_pAllocator;
     m_pContext = in_pContext;
+    SampleRate = in_rFormat.uSampleRate;
 
     return AK_Success;
 }
@@ -88,70 +89,72 @@ void MyPluginFX::Execute(AkAudioBuffer* io_pBuffer)
     const AkUInt32 uNumChannels = io_pBuffer->NumChannels();
 
     AkReal32 CompRatio = m_pParams->RTPC.fRatio;
-
-    // Threshold is converted from decibels to amp factor
-    AkReal32 AFThreshold = AK_DBTOLIN(m_pParams->RTPC.fThreshold);
-
-    // Monitor Data variables
-    AkReal32 rmsBefore = 0.f;
-    AkReal32 rmsAfter = 0.f;
-    AkReal32 rmsDiff = 0.f;
-
+    AkReal32 DBThreshold = m_pParams->RTPC.fThreshold;        // Threshold in dB
+    AkReal32 rmsMonitorBefore = 0.f;                          // RMS for Monitor, pre-effect
+    AkReal32 rmsMonitorAfter = 0.f;                           // RMS for Monitor, post-effect (needed only for Monitor Data)
+    const AkUInt32 rmsFrames = (SampleRate / 100);            // Number of frames over 10ms
     AkUInt16 uFramesProcessed;
     // For each channel
     for (AkUInt32 i = 0; i < uNumChannels; ++i)
     {
         AkReal32* AK_RESTRICT pBuf = (AkReal32 * AK_RESTRICT)io_pBuffer->GetChannel(i);
+        
 
-        // For each sample
         uFramesProcessed = 0;
         while (uFramesProcessed < io_pBuffer->uValidFrames)
         {
-            AkReal32 &AFSample = pBuf[uFramesProcessed];
+            AkReal32& AFSample = pBuf[uFramesProcessed];            // Amp Factor of the sample (LIN)
 
-            #ifndef AK_OPTIMIZED // RMS Before Monitor section
+            #ifndef AK_OPTIMIZED // Monitor post-effect RMS
             if (m_pContext->CanPostMonitorData())
             {
-                rmsBefore += powf(AFSample, 2);
+                rmsMonitorBefore += powf(AFSample, 2);
             }
             #endif
 
-            // DSP Section
-            // If amp factor over Threshold
-            if (fabsf(AFSample) > AFThreshold)
-            {
-                // Amp factor compressed = (Sample - Threshold) * (1 - 1/Ratio)
-                AkReal32 AFCompressed = (fabsf(AFSample) - AFThreshold) * (1 - (1 / CompRatio));
+            AkReal32 rmsMovingNew =                                 // Calculating new RMS based on previous instance
+                sqrtf(
+                    (
+                        (powf(rmsMoving, 2) * (rmsFrames - 1)       // a fake sum of previous frames' squares
+                        ) + powf(AFSample, 2)                       // add square of new sample
+                    ) / rmsFrames                                   // divide by frames to get new average of squares
+                );                                                  // square root everything
 
-                // Compress the sample
-                // New sample = a % of the old one
-                // Done this way so that it works whether amp factor is positive or negative 
-                AFSample *= (fabsf(AFSample) - AFCompressed) / fabsf(AFSample);
+            rmsMoving = rmsMovingNew;
+
+            // If Moving RMS is over Threshold 
+            if (rmsMoving > AK_DBTOLIN(DBThreshold))
+            {
+                // db to be compressed, a negative float 
+                AkReal32 DBCompressed =  -1 *                 
+                        ((AK_LINTODB(rmsMoving) - DBThreshold)      // the difference between threshold and RMS
+                                * (1 - (1 / CompRatio))             // apply compressor's ratio
+                        );                                          // make negative
+
+                // Compress the sample in linear
+                AFSample *= AK_DBTOLIN(DBCompressed);
             }
 
-            #ifndef AK_OPTIMIZED // RMS After Monitor section
+            #ifndef AK_OPTIMIZED // Monitor post-effect RMS
             if (m_pContext->CanPostMonitorData())
             {
-                rmsAfter += powf(AFSample, 2);
+                rmsMonitorAfter += powf(AFSample, 2);
             }
             #endif
-
             ++uFramesProcessed;
         }
+
     }
 
     #ifndef AK_OPTIMIZED       // RMS calculation and serialization
-    if (m_pContext->CanPostMonitorData())
-    {
-        rmsBefore /= (uNumChannels * io_pBuffer->uValidFrames);
-        rmsBefore = AK_LINTODB(sqrtf(rmsBefore));
-
-        rmsAfter /= (uNumChannels * io_pBuffer->uValidFrames);
-        rmsAfter = AK_LINTODB(sqrtf(rmsAfter));
-
-        AkReal32 monitorData[2] = { rmsBefore, rmsAfter };
-        m_pContext->PostMonitorData((void*)monitorData, sizeof(monitorData));
-    }
+        if (m_pContext->CanPostMonitorData())
+        {
+            rmsMonitorBefore = sqrt(rmsMonitorBefore/io_pBuffer->MaxFrames());
+            rmsMonitorAfter = sqrt(rmsMonitorAfter / io_pBuffer->MaxFrames());
+            AkReal32 rmsDiff = AK_LINTODB(rmsMonitorAfter) - AK_LINTODB(rmsMonitorBefore);              // Should be negative
+            AkReal32 monitorData[1] = { rmsDiff};
+            m_pContext->PostMonitorData((void*)monitorData, sizeof(monitorData));
+        }
     #endif
 }
 

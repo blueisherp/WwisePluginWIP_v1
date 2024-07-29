@@ -84,29 +84,19 @@ void MyPluginPluginGUI::NotifyMonitorData( AkTimeMs in_iTimeStamp, const AK::Wwi
         in_pMonitorDataArray != nullptr)
     {
         if (in_pMonitorDataArray->pData != nullptr &&
-            in_pMonitorDataArray->uDataSize == (sizeof(AkReal32) * 2)) // expects 2 elements of AKReal32 (rmsBefore, rmsAfter)
+            in_pMonitorDataArray->uDataSize == (sizeof(AkReal32) * 1)) // expects 1 element1 of AKReal32 (rmsDiff)
         {
             AkReal32* serializedData = (AkReal32*)in_pMonitorDataArray->pData;
 
             // Convert floats into strings with fixed precision (2 decimal places)
-            std::ostringstream ossInput, ossOutput, ossDiff;
-            ossInput << std::fixed << std::setprecision(2) << serializedData[0];
-            std::string inputSTR = ossInput.str();
-            ossOutput << std::fixed << std::setprecision(2) << serializedData[1];
-            std::string outputSTR = ossOutput.str();
+            std::ostringstream ossDiff;
+            ossDiff << std::fixed << std::setprecision(2) << serializedData[0];
+            std::string strDiff = ossDiff.str();
 
-            // Difference = AfterRMS - BeforeRMS, AKA the dB compressed
-            ossDiff << std::fixed << std::setprecision(2) << serializedData[1] - serializedData[0];
-            std::string diffSTR = ossDiff.str();
-
-            HWND inputRMSLabel = ::GetDlgItem(m_hwndPropView, IDC_INPUT_RMS);
-            ::SetWindowTextA(inputRMSLabel, inputSTR.c_str());
-
-            HWND outputRMSLabel = ::GetDlgItem(m_hwndPropView, IDC_OUTPUT_RMS);
-            ::SetWindowTextA(outputRMSLabel, outputSTR.c_str());
-
-            HWND diffRMSLabel = ::GetDlgItem(m_hwndPropView, IDC_DIFF_RMS);
-            ::SetWindowTextA(diffRMSLabel, diffSTR.c_str());
+            // Prints string to dialogue item
+            HWND inputRMSLabel = ::GetDlgItem(m_hwndPropView, IDC_DIFF_RMS);
+            ::SetWindowTextA(inputRMSLabel, strDiff.c_str());
+;
 
         }
     }
